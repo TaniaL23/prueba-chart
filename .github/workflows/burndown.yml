@@ -34,7 +34,7 @@ jobs:
         run: |
           python - << 'EOF'
           import os, json, re, requests
-          from datetime import datetime, timedelta
+          from datetime import datetime, timedelta, timezone
 
           token = os.getenv("GITHUB_TOKEN")
           repo = os.getenv("REPOSITORY")
@@ -45,7 +45,7 @@ jobs:
           # 1. Generar eje de fechas (Días del Sprint)
           start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
           end_date = datetime.strptime(end_str, "%Y-%m-%d").date()
-          today = datetime.utcnow().date()
+          today = datetime.now(timezone.utc).date()
 
           sprint_days = []
           curr = start_date
@@ -81,7 +81,7 @@ jobs:
               if issue.get("state") == "closed":
                   closed_points += pts
 
-          remaining_now = total_points - closed_points
+          remaining_points = total_points - closed_points
 
           # 3. Línea Ideal (Diagonal constante de Total a 0)
           ideal_data = []
@@ -102,7 +102,7 @@ jobs:
 
           # Registrar el dato de hoy
           today_label = today.strftime("%b %d")
-          history[today_label] = remaining_now
+          history[today_label] = remaining_points
 
           with open(history_file, "w") as f:
               json.dump(history, f, indent=2)
@@ -113,9 +113,8 @@ jobs:
               if day in history:
                   real_data.append(history[day])
               elif day == today_label:
-                  real_data.append(remaining_now)
+                  real_data.append(remaining_points)
               else:
-                  # Si la fecha es pasada y no hay registro, poner None o mantener anterior
                   real_data.append("null")
 
           # Formatear lista JS
@@ -207,4 +206,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./out
-          keep_files: true # Mantiene el historial de días anteriores registrado en history.json
+          keep_files: true
