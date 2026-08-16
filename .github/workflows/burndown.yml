@@ -1,7 +1,7 @@
 name: Generate Burndown Chart
 
 on:
-  workflow_dispatch: # Permite ejecutar el flujo manualmente desde Actions
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -10,8 +10,8 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Requerido para crear/actualizar la rama gh-pages
-      issues: read    # Requerido para leer los Story Points de las Issues
+      contents: write
+      issues: read
 
     steps:
       - name: Checkout del repositorio
@@ -25,7 +25,7 @@ jobs:
       - name: Instalar dependencias
         run: pip install requests
 
-      - name: Generar Burndown Chart (Script integrativo)
+      - name: Generar Burndown Chart
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
@@ -37,7 +37,6 @@ jobs:
           repo = os.getenv("REPOSITORY")
           headers = {"Authorization": f"token {token}"}
           
-          # 1. Obtener todas las Issues del repositorio
           url = f"https://api.github.com/repos/{repo}/issues?state=all&per_page=100"
           res = requests.get(url, headers=headers).json()
 
@@ -46,9 +45,8 @@ jobs:
 
           for issue in res:
               if "pull_request" in issue:
-                  continue # Ignorar PRs
+                  continue
               
-              # Buscar etiquetas tipo "point: X" o "points: X"
               pts = 0
               for label in issue.get("labels", []):
                   match = re.search(r'point[s]?:?\s*(\d+)', label["name"], re.IGNORECASE)
@@ -57,7 +55,7 @@ jobs:
                       break
               
               if pts == 0:
-                  pts = 1 # Valor por defecto si no tiene etiqueta de puntos
+                  pts = 1
                   
               total_points += pts
               if issue["state"] == "closed":
@@ -65,7 +63,6 @@ jobs:
 
           remaining_points = total_points - closed_points
 
-          # 2. Plantilla HTML/JS con Chart.js
           html_content = f"""<!DOCTYPE html>
           <html lang="es">
           <head>
