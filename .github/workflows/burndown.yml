@@ -1,0 +1,31 @@
+name: Generate Burndown Chart
+
+on:
+  schedule:
+    # Se ejecuta todos los días a la media noche (UTC)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Permite ejecutar el flujo manualmente desde la pestaña Actions
+
+permissions:
+  contents: write
+
+jobs:
+  generate-burndown:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate Burndown Chart
+        uses: gactions/burndown-chart-action@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MILESTONE: 'Sprint 1'         # Nombre exacto de tu Milestone
+          NOT_COMPLETED_LABELS: 'todo,in-progress'
+          COMPLETED_LABELS: 'done'
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./out           # Carpeta con el HTML/JS generado por la action
