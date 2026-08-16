@@ -1,20 +1,20 @@
 name: Generate Burndown Chart
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+  schedule:
+    # Se ejecuta todos los días a la medianoche (UTC)
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Permite ejecutar el flujo manualmente desde la pestaña Actions
+
+permissions:
+  contents: write
+  issues: read
 
 jobs:
-  build-and-deploy:
+  generate-burndown:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: read
-
     steps:
-      - name: Checkout del repositorio
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Configurar Python
@@ -29,45 +29,59 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
+          TARGET_MILESTONE: 'Sprint 1' # Especifica aquí el nombre exacto de tu Milestone
         run: |
           python - << 'EOF'
           import os, json, re, requests
 
           token = os.getenv("GITHUB_TOKEN")
           repo = os.getenv("REPOSITORY")
+          target_ms = os.getenv("TARGET_MILESTONE")
           headers = {"Authorization": f"token {token}"}
-          
-          url = f"https://api.github.com/repos/{repo}/issues?state=all&per_page=100"
-          res = requests.get(url, headers=headers).json()
 
+          # 1. Obtener la lista de Milestones para encontrar el ID del objetivo
+          ms_url = f"https://api.github.com/repos/{repo}/milestones"
+          ms_res = requests.get(ms_url, headers=headers).json()
+          
+          ms_number = None
+          for ms in ms_res:
+              if ms.get("title") == target_ms:
+                  ms_number = ms["number"]
+                  break
+
+          # 2. Obtener las Issues asociadas a ese Milestone
           total_points = 0
           closed_points = 0
 
-          for issue in res:
-              if "pull_request" in issue:
-                  continue
-              
-              pts = 0
-              for label in issue.get("labels", []):
-                  match = re.search(r'point[s]?:?\s*(\d+)', label["name"], re.IGNORECASE)
-                  if match:
-                      pts = int(match.group(1))
-                      break
-              
-              if pts == 0:
-                  pts = 1
+          if ms_number:
+              issues_url = f"https://api.github.com/repos/{repo}/issues?milestone={ms_number}&state=all&per_page=100"
+              issues = requests.get(issues_url, headers=headers).json()
+
+              for issue in issues:
+                  if "pull_request" in issue:
+                      continue
                   
-              total_points += pts
-              if issue["state"] == "closed":
-                  closed_points += pts
+                  pts = 0
+                  for label in issue.get("labels", []):
+                      match = re.search(r'point[s]?:?\s*(\d+)', label["name"], re.IGNORECASE)
+                      if match:
+                          pts = int(match.group(1))
+                          break
+                  if pts == 0:
+                      pts = 1
+                      
+                  total_points += pts
+                  if issue["state"] == "closed":
+                      closed_points += pts
 
           remaining_points = total_points - closed_points
 
+          # 3. Generar HTML en la carpeta ./out
           html_content = f"""<!DOCTYPE html>
           <html lang="es">
           <head>
               <meta charset="UTF-8">
-              <title>Burndown Chart</title>
+              <title>Burndown Chart - {target_ms}</title>
               <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
               <style>
                   body {{ font-family: Arial, sans-serif; display: flex; justify-content: center; padding: 40px; background: #f4f6f8; }}
@@ -76,7 +90,7 @@ jobs:
           </head>
           <body>
               <div class="card">
-                  <h2>Sprint Burndown Chart</h2>
+                  <h2>Burndown Chart - {target_ms}</h2>
                   <canvas id="burndownChart"></canvas>
               </div>
               <script>
@@ -105,13 +119,13 @@ jobs:
           </body>
           </html>"""
 
-          os.makedirs("public", exist_ok=True)
-          with open("public/index.html", "w", encoding="utf-8") as f:
+          os.makedirs("out", exist_ok=True)
+          with open("out/index.html", "w", encoding="utf-8") as f:
               f.write(html_content)
           EOF
 
-      - name: Publicar en la rama gh-pages
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./public
+          publish_dir: ./out
