@@ -1,31 +1,120 @@
 name: Generate Burndown Chart
 
 on:
-  schedule:
-    # Se ejecuta todos los días a la media noche (UTC)
-    - cron: '0 0 * * *'
-  workflow_dispatch: # Permite ejecutar el flujo manualmente desde la pestaña Actions
-
-permissions:
-  contents: write
+  workflow_dispatch: # Permite ejecutar el flujo manualmente desde Actions
+  push:
+    branches:
+      - main
 
 jobs:
-  generate-burndown:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Requerido para crear/actualizar la rama gh-pages
+      issues: read    # Requerido para leer los Story Points de las Issues
+
     steps:
-      - name: Checkout repository
+      - name: Checkout del repositorio
         uses: actions/checkout@v4
 
-      - name: Generate Burndown Chart
-        uses: dAnjou/action-burndown@v1
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MILESTONE: 'Sprint 1'         # Nombre exacto de tu Milestone
-          NOT_COMPLETED_LABELS: 'todo,in-progress'
-          COMPLETED_LABELS: 'done'
+          python-version: '3.x'
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Generar Burndown Chart (Script integrativo)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          python - << 'EOF'
+          import os, json, re, requests
+
+          token = os.getenv("GITHUB_TOKEN")
+          repo = os.getenv("REPOSITORY")
+          headers = {"Authorization": f"token {token}"}
+          
+          # 1. Obtener todas las Issues del repositorio
+          url = f"https://api.github.com/repos/{repo}/issues?state=all&per_page=100"
+          res = requests.get(url, headers=headers).json()
+
+          total_points = 0
+          closed_points = 0
+
+          for issue in res:
+              if "pull_request" in issue:
+                  continue # Ignorar PRs
+              
+              # Buscar etiquetas tipo "point: X" o "points: X"
+              pts = 0
+              for label in issue.get("labels", []):
+                  match = re.search(r'point[s]?:?\s*(\d+)', label["name"], re.IGNORECASE)
+                  if match:
+                      pts = int(match.group(1))
+                      break
+              
+              if pts == 0:
+                  pts = 1 # Valor por defecto si no tiene etiqueta de puntos
+                  
+              total_points += pts
+              if issue["state"] == "closed":
+                  closed_points += pts
+
+          remaining_points = total_points - closed_points
+
+          # 2. Plantilla HTML/JS con Chart.js
+          html_content = f"""<!DOCTYPE html>
+          <html lang="es">
+          <head>
+              <meta charset="UTF-8">
+              <title>Burndown Chart</title>
+              <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+              <style>
+                  body {{ font-family: Arial, sans-serif; display: flex; justify-content: center; padding: 40px; background: #f4f6f8; }}
+                  .card {{ background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 700px; }}
+              </style>
+          </head>
+          <body>
+              <div class="card">
+                  <h2>Sprint Burndown Chart</h2>
+                  <canvas id="burndownChart"></canvas>
+              </div>
+              <script>
+                  const ctx = document.getElementById('burndownChart').getContext('2d');
+                  new Chart(ctx, {{
+                      type: 'line',
+                      data: {{
+                          labels: ['Total Inicial', 'Estado Actual'],
+                          datasets: [
+                              {{
+                                  label: 'Puntos Restantes',
+                                  data: [{total_points}, {remaining_points}],
+                                  borderColor: '#3b82f6',
+                                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                                  fill: true,
+                                  tension: 0.1
+                              }}
+                          ]
+                      }},
+                      options: {{
+                          responsive: true,
+                          scales: {{ y: {{ beginAtZero: true }} }}
+                      }}
+                  }});
+              </script>
+          </body>
+          </html>"""
+
+          os.makedirs("public", exist_ok=True)
+          with open("public/index.html", "w", encoding="utf-8") as f:
+              f.write(html_content)
+          EOF
+
+      - name: Publicar en la rama gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./out           # Carpeta con el HTML/JS generado por la action
+          publish_dir: ./public
